@@ -1,0 +1,80 @@
+#!/bin/ksh
+#Script to create Updated NIM resources - lpp_source and spot
+#
+#sivaram  1.0    4/22/2013
+#
+#
+#
+# Track the status from tail -f /tmp/nim_update_msg
+
+#set -x
+if (( $# != 5 )); then
+echo "Error : Invalid argument count" >&2
+echo "Usage : NIM_GEN <LPP GOLD> <CUM DIR> <BUILD DIR> <NEW LPP NAME> < NEW SPOT NAME>" >&2
+echo "Usage : NIM_GEN aix53X_GOLD_lppsource /mnt/53X/CUM /mnt/53X/BUILD aix53X_SP7_lppsource aix53X_SP7_spot"
+return 100
+fi
+
+SOURCE_GOLD=$1
+SOURCE_CUM=$2
+SOURCE_BUILD=$3
+NEW_LPP=$4
+NEW_SPOT=$5
+
+
+#LPP=/export/lpp_source/$NEW_LPP
+#SPOT=/export/lpp_source/$NEW_SPOT
+
+echo $SOURCE_GOLD
+echo $SOURCE_CUM
+echo $SOURCE_BUILD
+echo $NEW_LPP
+echo $NEW_SPOT
+
+echo "Create new Dir. for lpp_source \n"
+mkdir /export/lpp_source/$NEW_LPP || return 101
+
+echo " Define new lpp_source from existing NIM lpp \n"
+nim -o define -t lpp_source -a server=master -a location=/export/lpp_source/$NEW_LPP -a source=$SOURCE_GOLD $NEW_LPP
+
+if [ $? -gt 0 ]; then
+echo " "
+echo "Error during define lpp_source"
+exit 1
+fi
+
+echo " Update lpp_source using latest CUM \n"
+bffcreate -qUvXt /export/lpp_source/$NEW_LPP  -d $SOURCE_CUM all || return 102
+
+echo " Update lpp_source using latest Build \n"
+bffcreate -qUvXt /export/lpp_source/$NEW_LPP  -d $SOURCE_BUILD all
+
+echo "Remove redundant filesets using lppmgr in lpp_source \n"
+/usr/lib/instl/lppmgr -d  /export/lpp_source/$NEW_LPP -u -b -x -r -e || return 103
+
+echo "Change  lpp_source permissions \n"
+chmod -R 755 /export/lpp_source/$NEW_LPP || return 104
+
+chown -R root.system /export/lpp_source/$NEW_LPP || return 105
+
+echo "Update the installation table-of-contents & updates the simages attribute for the lpp_source\n"
+nim -Fo check $NEW_LPP
+if [ $? -gt 0 ]; then
+echo " "
+echo "Error during check lpp_source"
+exit 2
+fi
+
+echo "NFS export the lpp_source directory \n"
+/usr/sbin/mknfsexp -d /export/lpp_source/$NEW_LPP -B -v 3,4 -S sys,krb5p,krb5i,krb5,dh -t ro || return 106
+
+echo "Define spot from lpp_source \n"
+nim -o define -t spot -a auto_expand=yes -a server=master -a source=$NEW_LPP -a location=/export/spot $NEW_SPOT
+
+if [ $? -gt 0 ]; then
+echo " "
+echo "Error during define spot"
+exit 3
+fi
+
+echo "##### lpp_source:$NEW_LPP & spot:$NEW_SPOT created successfully #####"
